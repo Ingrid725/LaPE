@@ -1,4 +1,6 @@
 # Layer-adaptive-Position-Embedding
+## Introdcution
+LaPE is a kind of new Position Embedding joining method, and it is compatible to most of the Vision Transformer. Here we use the codebase of [DeiT](https://github.com/facebookresearch/deit) to illustrate how to adding LaPE to Vision Transformer.
 
 ## Train the model
 ```
