@@ -17,7 +17,6 @@ from timm.scheduler import create_scheduler
 from timm.optim import create_optimizer
 from timm.utils import NativeScaler, get_state_dict, ModelEma
 
-# from msa_visualize import msa_visualize
 from datasets import build_dataset
 from engine import train_one_epoch, evaluate
 from losses import DistillationLoss
@@ -41,13 +40,13 @@ def get_args_parser():
     parser.add_argument('--model', default='deit_base_patch16_224', type=str, metavar='MODEL',
                         help='Name of model to train')
     parser.add_argument('--pe', default='learnable', type=str, metavar='NAME',
-                        choices=['learnable','1D_sin','2D_sin','RPE'],
+                        choices=['learnable','1D_sin','2D_sin','2D_RPE'],
                         help='Type of position embedding')
-    parser.add_argument('--pe_joining', default='default', type=str, metavar='MODEL',
-                        choices=['default','LaPE'],
-                        help='PE adding type for model')
+    parser.add_argument('--join-type', default='basic', type=str, metavar='NAME',
+                        choices=['basic', 'LaPE', 'share'],
+                        help='PE join type for model')
+    
     parser.add_argument('--input-size', default=224, type=int, help='images input size')
-
     parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
                         help='Dropout rate (default: 0.)')
     parser.add_argument('--drop-path', type=float, default=0.1, metavar='PCT',
@@ -71,7 +70,6 @@ def get_args_parser():
                         help='SGD momentum (default: 0.9)')
     parser.add_argument('--weight-decay', type=float, default=0.05,
                         help='weight decay (default: 0.05)')
-    
     # Learning rate schedule parameters
     parser.add_argument('--sched', default='cosine', type=str, metavar='SCHEDULER',
                         help='LR scheduler (default: "cosine"')
@@ -108,13 +106,17 @@ def get_args_parser():
     parser.add_argument('--smoothing', type=float, default=0.1, help='Label smoothing (default: 0.1)')
     parser.add_argument('--train-interpolation', type=str, default='bicubic',
                         help='Training interpolation (random, bilinear, bicubic default: "bicubic")')
+
     parser.add_argument('--repeated-aug', action='store_true')
     parser.add_argument('--no-repeated-aug', action='store_false', dest='repeated_aug')
     parser.set_defaults(repeated_aug=True)
+    
     parser.add_argument('--train-mode', action='store_true')
     parser.add_argument('--no-train-mode', action='store_false', dest='train_mode')
     parser.set_defaults(train_mode=True)
+    
     parser.add_argument('--ThreeAugment', action='store_true') #3augment
+    
     parser.add_argument('--src', action='store_true') #simple random crop
     
     # * Random Erase params
@@ -172,7 +174,7 @@ def get_args_parser():
                         help='start epoch')
     parser.add_argument('--eval', action='store_true', help='Perform evaluation only')
     parser.add_argument('--dist-eval', action='store_true', default=False, help='Enabling distributed evaluation')
-    parser.add_argument('--num_workers', default=10, type=int)
+    parser.add_argument('--num_workers', default=16, type=int)
     parser.add_argument('--pin-mem', action='store_true',
                         help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
     parser.add_argument('--no-pin-mem', action='store_false', dest='pin_mem',
@@ -184,9 +186,6 @@ def get_args_parser():
                         help='number of distributed processes')
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
 
-    # visualize of each part of msa
-    parser.add_argument('--msa-visualize', action='store_true', help='visualize of each part of msa')
-
     return parser
 
 
@@ -194,13 +193,9 @@ def main(args):
     utils.init_distributed_mode(args)
     print(args)
 
-    # 可视化msa
-    if args.msa_visualize:
-        msa_visualize(args)
-
     if args.distillation_type != 'none' and args.finetune and not args.eval:
         raise NotImplementedError("Finetuning with distillation not yet supported")
-
+    
     device = torch.device(args.device)
 
     # fix the seed for reproducibility
@@ -264,11 +259,12 @@ def main(args):
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=args.nb_classes)
 
+    
     print(f"Creating model: {args.model}")
     model = create_model(
         args.model,
         pe=args.pe,
-        pe_joining=args.pe_joining,
+        join_type=args.join_type,
         pretrained=False,
         num_classes=args.nb_classes,
         drop_rate=args.drop,
@@ -277,7 +273,7 @@ def main(args):
         img_size=args.input_size
     )
     print(model)
-                    
+    
     if args.finetune:
         if args.finetune.startswith('https'):
             checkpoint = torch.hub.load_state_dict_from_url(
@@ -293,7 +289,7 @@ def main(args):
             if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
                 print(f"Removing key {k} from pretrained checkpoint")
                 del checkpoint_model[k]
-
+        
         # interpolate position embedding
         pos_embed_checkpoint = checkpoint_model['pos_embed']
         embedding_size = pos_embed_checkpoint.shape[-1]
@@ -315,7 +311,7 @@ def main(args):
         checkpoint_model['pos_embed'] = new_pos_embed
 
         model.load_state_dict(checkpoint_model, strict=False)
-        
+    
     if args.attn_only:
         for name_p,p in model.named_parameters():
             if '.attn.' in name_p:
@@ -352,7 +348,7 @@ def main(args):
     model_without_ddp = model
     if args.distributed:
         # ,find_unused_parameters=True
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
         model_without_ddp = model.module
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)
@@ -409,10 +405,6 @@ def main(args):
                 args.resume, map_location='cpu', check_hash=True)
         else:
             checkpoint = torch.load(args.resume, map_location='cpu')
-            # checkpoint['model'].pop('token_norm.weight')
-            # checkpoint['model'].pop('token_norm.bias')
-            # checkpoint['model'].pop('pe_norm.weight')
-            # checkpoint['model'].pop('pe_norm.bias')
         model_without_ddp.load_state_dict(checkpoint['model'])
         if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
             optimizer.load_state_dict(checkpoint['optimizer'])

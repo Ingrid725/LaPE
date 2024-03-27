@@ -60,6 +60,10 @@ def build_dataset(is_train, args):
         dataset = datasets.CIFAR100(args.data_path, train=is_train, transform=transform)
         nb_classes = 100
     elif args.data_set == 'IMNET':
+        # if is_train:
+        #     root = os.path.join(args.data_path, 'train')
+        # else:
+        #     root = './data/imagenet2'
         root = os.path.join(args.data_path, 'train' if is_train else 'val')
         dataset = datasets.ImageFolder(root, transform=transform)
         nb_classes = 1000

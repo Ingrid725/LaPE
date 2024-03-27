@@ -1,5 +1,7 @@
 import os
+import sys
 import torch
+import argparse
 import seaborn as sns
 import matplotlib.pyplot as plt
 import torch.nn as nn
@@ -7,137 +9,166 @@ plt.switch_backend('agg')
 import models
 from timm.models import create_model
 
+'''
+# command
+python similarity_visualize.py --ckpt_path result/deit_t_LaPE/best_checkpoint.pth \
+    --save_dir visualize/similarity/ --model_name deit_t_LaPE --pe learnable \
+    --join-type LaPE
+'''
 
 def calculate_cosine_similarity_matrix(h_emb, eps=1e-8):
-    # h_emb (N, M)
+    # h_emb (N, D)
     # normalize
     a_n = h_emb.norm(dim=1).unsqueeze(1)
     a_norm = h_emb / torch.max(a_n, eps * torch.ones_like(a_n))
 
     # cosine similarity matrix
     sim_matrix = torch.einsum('bc,cd->bd', a_norm, a_norm.transpose(0,1))
+    # sim_matrix = torch.einsum('bc,cd->bd', h_emb, h_emb.transpose(0,1))
     return sim_matrix
 
+def get_args_parser():
+    parser = argparse.ArgumentParser('Position embedding correlation viualization script', add_help=False)
+    parser.add_argument('--ckpt_path', default='result/deit_t_LaPE/best_checkpoint.pth', type=str, 
+                        help='The path of the model used to visualize the similarity')
+    parser.add_argument('--save_dir', default='visualize/similarity/', type=str, 
+                        help='The output dir')
+    parser.add_argument('--model_name', default='deit_t_LaPE', type=str, 
+                        choices=['deit_t_basic', 'deit_t_LaPE', 'deit_t_distill_basic', 'deit_t_distill_LaPE', 'deit_s_basic', 'deit_s_LaPE', 'deit_s_distill_basic', 'deit_s_distill_LaPE'],
+                        metavar='MODEL', help='Name of model')
+    parser.add_argument('--pe', default='learnable', type=str, 
+                        choices=['learnable', '1D_sin', '2D_sin', '1D_RPE', '2D_RPE'],
+                        metavar='NAME', help='Position embedding type in the model')
+    parser.add_argument('--join-type', default='LaPE', type=str, 
+                        choices=['basic', 'LaPE', 'share'],
+                        metavar='NAME', help='Position embedding join type')
+    return parser
+
 def main():
-    # checkpoint path
-    ckpt = './result/deit_t_default_2dRPE/best_checkpoint.pth'
-    save_dir = './visualize/'
+    parser = argparse.ArgumentParser('Position embedding correlation viualization script', parents=[get_args_parser()])
+    args = parser.parse_args()
+    save_dir = os.path.join(args.save_dir,args.model_name)
     
-    file_name = ckpt.split('/')[-2]
-    save_dir = os.path.join(save_dir,file_name)
-
-    # pe
-    pe = '1D_sin' # ['learnable','1D_sin','2D_sin','RPE']
-
-    # pe joining method
-    pe_joining = 'default' # ['default', 'LaPE']
-    
-    depth = 12
-
     # model类型
-    if 'deit_t' in file_name:
+    if args.model_name in ['deit_t_basic', 'deit_t_LaPE']:
         model_name = 'deit_tiny_patch16_224'
-    elif file_name in ('deit_t_distill_default','deit_t_distill_LaPE'):
+    elif args.model_name in ['deit_t_distill_basic', 'deit_t_distill_LaPE']:
         model_name = 'deit_tiny_distilled_patch16_224'
-    elif file_name in ('deit_s_default','deit_s_LaPE'):
+    elif args.model_name in ['deit_s_basic', 'deit_s_LaPE']:
         model_name = 'deit_small_patch16_224'
-    elif file_name in ('deit_s_distill_default','deit_s_distill_LaPE'):
+    elif args.model_name in ['deit_s_distill_basic','deit_s_distill_LaPE']:
         model_name = 'deit_small_distilled_patch16_224'
-    elif file_name in ('deit_b_default','deit_b_LaPE'):
+    elif args.model_name in ['deit_b_basic','deit_b_LaPE']:
         model_name = 'deit_base_patch16_224'
-    elif file_name in ('deit_b_distill_default','deit_b_distill_LaPE'):
+    elif args.model_name in ['deit_b_distill_basic','deit_b_distill_LaPE']:
         model_name = 'deit_base_distilled_patch16_224'
-
+    
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     
     model = create_model(model_name,
-                        pe=pe,
-                        pe_joining=pe_joining,
+                        pe=args.pe,
+                        join_type=args.join_type,
                         pretrained=False,
                         num_classes=1000,
                         drop_rate=0.0,
                         drop_path_rate=0.1,
                         drop_block_rate=None,
                         img_size=224)
-    model.load_state_dict(torch.load(ckpt, map_location='cpu')['model'])
-    pos_embed = torch.squeeze(model.state_dict()['pos_embed'])
-    pos_embed = pos_embed[1:,:]
+    model.load_state_dict(torch.load(args.ckpt_path, map_location='cpu')['model'])
+    
+    if args.pe in ['1D_RPE', '2D_RPE']:
+        for i in range(model.depth):
+            key1 = f'blocks.{i}.attn.relative_position_bias_table'
+            key2 = f'blocks.{i}.attn.relative_position_index'
+            table = model.state_dict()[key1]
+            index = model.state_dict()[key2]
+            relative_position_bias = table[index.view(-1)].view(14 * 14, 14 * 14, -1)
+            # fig,ax = plt.subplots(1,3)
+            for j in range(3):
+                sns.heatmap(relative_position_bias[:,:,j])
+                plt.savefig(save_dir+f'/{args.join_type}_layer{i}_head{j}.jpg')
+                plt.close()
 
-    # visualize for VTs with default PE
-    if pe_joining=='default':
-        similarity = calculate_cosine_similarity_matrix(pos_embed)
-        sns.heatmap(similarity)
-        plt.savefig(save_dir+'/initial_pe.jpg' %pe_joining)
-        plt.close()
+    pos_embed = torch.squeeze(model.state_dict()['pos_embed']) # (197, 768)
+    pos_embed = pos_embed[1:,:] # (196, 768)
+    similarity = calculate_cosine_similarity_matrix(pos_embed) # (196, 196)
+    token_sim = similarity[90].reshape(14,14) # (14, 14)
+    sns.heatmap(token_sim)
+    plt.savefig(save_dir+'/PE_token_sim.jpg')
+    plt.close()
 
+    num_tokens, dim = pos_embed.shape # 196
+    if args.join_type in ('basic', 'share'):
         dim = pos_embed.shape[-1]
-        weights = torch.zeros(depth,dim)
-        biases = torch.zeros(depth,dim)
-        weight_ind = bias_ind = 0
-        for key in model.state_dict():
-            # blocks.x.norm1.weight
-            if 'norm1.weight' in key:
-                weights[weight_ind] = model.state_dict()[key]
-                weight_ind += 1
-            # blocks.x.norm1.bias
-            if 'norm1.bias' in key:
-                biases[bias_ind] = model.state_dict()[key]
-                bias_ind += 1
-        for ind in range(depth): 
-            norm = nn.LayerNorm([dim],elementwise_affine=False)
-            PE_norm = weights[ind] * norm(pos_embed) + biases[ind]
-            similarity = calculate_cosine_similarity_matrix(PE_norm)
-            sns.heatmap(similarity, vmin=0, vmax=1.0)
-            plt.savefig(save_dir+'/default_sim_layer%s.jpg' %ind)
-            plt.close()
-            token_sim = similarity[90].reshape(14,14)
-            sns.heatmap(token_sim, vmin=0, vmax=1.0)
-            plt.savefig(save_dir+'/default_token_sim_layer%s.jpg' %ind)
-            plt.close()
-
-    # visualize for VTs with LaPE
-    elif pe_joining=='LaPE':
-        dim = pos_embed.shape[-1]
-        weights = torch.zeros(12,dim)
-        biases = torch.zeros(12,dim)
+        weights = torch.zeros(model.depth,dim)
+        biases = torch.zeros(model.depth,dim)
         weight_ind = 0
         bias_ind = 0
         for key in model.state_dict():
-            # blocks.x.pe_norm.weight
-            if 'pe_norm.weight' in key:
+            if 'norm1.weight' in key: # blocks.x.norm1.weight
                 weights[weight_ind] = model.state_dict()[key]
                 weight_ind += 1
-            # blocks.x.pe_norm.bias'
-            if 'pe_norm.bias' in key:
+            if 'norm1.bias' in key: # blocks.x.norm1.bias
                 biases[bias_ind] = model.state_dict()[key]
                 bias_ind += 1
-        for ind in range(12):
+        for ind in range(model.depth): 
             norm = nn.LayerNorm([dim],elementwise_affine=False)
             PE_norm = weights[ind] * norm(pos_embed) + biases[ind]
             similarity = calculate_cosine_similarity_matrix(PE_norm)
-            sns.heatmap(similarity,vmin=0,vmax=1.0)
-            plt.savefig(save_dir+'/LaPE_sim_layer%s.jpg' %ind)
+            ax = sns.heatmap(similarity)
+            ax.tick_params(left=False, bottom=False)
+            plt.savefig(save_dir+f'/{args.join_type}_layer{ind}_sim_overall.jpg')
             plt.close()
+        # fig,ax = plt.subplots(4,3)
+        for ind in range(model.depth):
+            norm = nn.LayerNorm([dim],elementwise_affine=False)
+            PE_norm = weights[ind] * norm(pos_embed) + biases[ind]
+            similarity = calculate_cosine_similarity_matrix(PE_norm)
             token_sim = similarity[90].reshape(14,14)
-            sns.heatmap(token_sim,vmin=0,vmax=1.0)
-            plt.savefig(save_dir+'/LaPE_token_sim_layer%s.jpg' %ind)
+            ax = sns.heatmap(token_sim, vmin=0, vmax=1.0)
+            ax.tick_params(left=False, bottom=False)
+            plt.savefig(save_dir + f'/{args.join_type}_layer{ind}_sim_90thToken.jpg')
             plt.close()
-    
-    # visualize for VTs with RPE
-    # elif pe=='RPE':
-    #     for i in range(depth):
-    #         key1 = f'blocks.{i}.attn.relative_position_bias_table'
-    #         key2 = f'blocks.{i}.attn.relative_position_index'
-    #         table = model.state_dict()[key1]
-    #         index = model.state_dict()[key2]
-    #         relative_position_bias = table[index.view(-1)].view(14 * 14, 14 * 14, -1)
-    #         for j in range(3):
-    #             sns.heatmap(relative_position_bias[:,:,j])
-    #             plt.savefig(save_dir+f'/RPE_layer{i}_head{j}.jpg')
-    #             plt.close()
+        # sns.heatmap(token_sim,ax=ax[ind//3,ind%3])
+        # plt.savefig(save_dir+'/sim_90thToken.jpg')
+        # plt.close()
 
-
+    elif args.join_type=='LaPE':
+        weights = torch.zeros(model.depth,dim)
+        biases = torch.zeros(model.depth,dim)
+        PE_norm = torch.zeros(model.depth+1,num_tokens,dim)
+        PE_norm[0] = pos_embed
+        # get the weights and biases of each layer's LN
+        weight_ind, bias_ind = 0, 0
+        for key in model.state_dict():
+            if 'pe_norm.weight' in key:
+                weights[weight_ind] = model.state_dict()[key]
+                weight_ind += 1
+            if 'pe_norm.bias' in key:
+                biases[bias_ind] = model.state_dict()[key]
+                bias_ind += 1
+        # get the similarity of each layer's PE
+        for ind in range(model.depth): 
+            norm = nn.LayerNorm([dim],elementwise_affine=False)
+            PE_norm[ind+1] = weights[ind] * norm(PE_norm[ind]) + biases[ind]
+            similarity = calculate_cosine_similarity_matrix(PE_norm[ind+1])
+            ax = sns.heatmap(similarity, vmin=0, vmax=1.0)
+            ax.tick_params(left=False, bottom=False)
+            plt.savefig(save_dir + f'/{args.join_type}_layer{ind}_sim_overall.jpg') # LaPE_layer0_sim.jpg
+            plt.close()
+        # get the similarity of the 90th token in each layer
+        # fig,ax = plt.subplots(4,3)
+        for ind in range(model.depth):
+            norm = nn.LayerNorm([dim],elementwise_affine=False)
+            PE_norm[ind+1] = weights[ind] * norm(PE_norm[ind]) + biases[ind]
+            similarity = calculate_cosine_similarity_matrix(PE_norm[ind+1])
+            token_sim = similarity[90].reshape(14,14)
+            ax = sns.heatmap(token_sim, vmin=0, vmax=1.0)
+            ax.tick_params(left=False, bottom=False)
+            plt.savefig(save_dir + f'/{args.join_type}_layer{ind}_sim_90thToken.jpg')
+            plt.close()
+    print(f'Visualization done! Results saved in {save_dir}.')
 
 if __name__ == '__main__':
     main()

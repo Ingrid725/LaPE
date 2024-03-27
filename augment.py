@@ -15,10 +15,11 @@ import numpy as np
 from torchvision import datasets, transforms
 import random
 
-
-
 from PIL import ImageFilter, ImageOps
 import torchvision.transforms.functional as TF
+
+import warnings
+# warnings.filterwarnings('ignore')
 
 
 class GaussianBlur(object):
@@ -117,7 +118,7 @@ def new_data_aug_generator(args = None):
     final_tfl = [
             transforms.ToTensor(),
             transforms.Normalize(
-                mean=torch.tensor(mean),
-                std=torch.tensor(std))
+                mean=torch.as_tensor(mean),
+                std=torch.as_tensor(std))
         ]
     return transforms.Compose(primary_tfl+secondary_tfl+final_tfl)

@@ -5,6 +5,7 @@ import torch.nn as nn
 from functools import partial
 
 from vision_transformer import VisionTransformer, _cfg
+# from timm.models.vision_transformer import VisionTransformer, _cfg
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_
 
@@ -15,7 +16,6 @@ __all__ = [
     'deit_base_distilled_patch16_224', 'deit_base_patch16_384',
     'deit_base_distilled_patch16_384',
 ]
-
 
 class DistilledVisionTransformer(VisionTransformer):
     def __init__(self, *args, **kwargs):
@@ -39,20 +39,13 @@ class DistilledVisionTransformer(VisionTransformer):
         dist_token = self.dist_token.expand(B, -1, -1)
         x = torch.cat((cls_tokens, dist_token, x), dim=1)
 
-        if self.pe_joining=='default':
-            x = self.pos_drop(x+self.pos_embed)
-            for blk in self.blocks:
-                x = blk(x)
-        
-        elif self.pe_joining=='LaPE':
-            x = self.pos_drop(x)
-            for LaPE_blk in self.blocks:
-                x = LaPE_blk(x, pos_embed=self.pos_embed)
-        
-        elif self.pe=='RPE':
-            x = self.pos_drop(x)
-            for RPE_blk in self.blocks:
-                x = RPE_blk(x)
+        if self.adding_type=='basic':
+            x = x + self.pos_embed
+        x = self.pos_drop(x)
+
+        pos_embed = self.pos_embed
+        for ind, blk in enumerate(self.blocks):
+            x, pos_embed = blk(x,pos_embed=pos_embed, ind=ind)
 
         x = self.norm(x)
         return x[:, 0], x[:, 1]
