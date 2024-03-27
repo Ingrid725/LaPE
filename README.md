@@ -1,7 +1,9 @@
 <div align="center">
+
 # 【ICCV'2023 🔥】LaPE: Layer-adaptive Position Embedding for Vision Transformers with Independent Layer Normalization
 [![Paper](https://img.shields.io/badge/ICCV-2023-FFD93D.svg)](https://openaccess.thecvf.com/content/ICCV2023/papers/Yu_LaPE_Layer-adaptive_Position_Embedding_for_Vision_Transformers_with_Independent_Layer_ICCV_2023_paper.pdf)
 </div>
+LaPE is a simple yet effective position embedding join method for each Vision Transformer. Here we use the codebase of [DeiT](https://github.com/facebookresearch/deit) to illustrate how to realize LaPE.
 
 ## 📕 Overview
 Position information is critical for Vision Transformers (VTs) due to the permutation-invariance of self-attention operations. A typical way to introduce position information is adding the absolute Position Embedding (PE) to patch embedding before entering VTs. 
@@ -14,7 +16,7 @@ To overcome these limitations, we propose using two independent LNs for token em
 <img src="figures/fig.png" width="600px">
 </div>
 
-Here we use the codebase of [DeiT](https://github.com/facebookresearch/deit) to illustrate how to realize LaPE.
+
 
 ## 🚀 Quick Start
 ### Data preparation
