@@ -1,6 +1,4 @@
-# Layer-adaptive-Position-Embedding
 <div align="center">
-  
 # 【ICCV'2023 🔥】LaPE: Layer-adaptive Position Embedding for Vision Transformers with Independent Layer Normalization
 [![Paper](https://img.shields.io/badge/ICCV-2023-FFD93D.svg)](https://openaccess.thecvf.com/content/ICCV2023/papers/Yu_LaPE_Layer-adaptive_Position_Embedding_for_Vision_Transformers_with_Independent_Layer_ICCV_2023_paper.pdf)
 </div>
@@ -18,37 +16,67 @@ To overcome these limitations, we propose using two independent LNs for token em
 
 Here we use the codebase of [DeiT](https://github.com/facebookresearch/deit) to illustrate how to realize LaPE.
 
-## Dataset Prepare
-
-
-## Train the model
+## 🚀 Quick Start
+### Data preparation
+Download and extract ImageNet train and val images from http://image-net.org/. The directory structure is the standard layout for the torchvision datasets.ImageFolder, and the training and validation data is expected to be in the train/ folder and val folder respectively:
 ```
-python -m torch.distributed.launch --nproc_per_node=[num_gpus] --master_port [port] --use_env main.py --model [model type] --batch-size [bs] --data-path [path to dataset] --output_dir [path to output] --adding-type [PE joining method] 
+/path/to/ImageNet/
+  train/
+    class1/
+      img1.jpeg
+    class2/
+      img2.jpeg
+  val/
+    class1/
+      img3.jpeg
+    class2/
+      img4.jpeg
+```
+### Setup Environmet
+```
+conda create -n LaPE python=3.7
+conda activate LaPE
+pip install -r requirements.txt
+```
+or you can use the following docker image
+```
+sudo docker run -it --gpus all  --rm -v /local/directory:/container/directory vrunyiyu/deit_lape:new bash
+```
+
+### Training
+```
+python -m torch.distributed.launch --nproc_per_node=[num_gpus] --master_port [port] \
+    --use_env main.py --model [model type] --batch-size [bs] \
+    --data-path [path to dataset] --output_dir [path to output] --join-type [PE joining method] 
 ```
 for example
 ```
-python -m torch.distributed.launch --nproc_per_node=4 --master_port 29400 --use_env main.py --model deit_tiny_patch16_224 --batch-size 256 --data-path data/imagenet --output_dir result/deit_t_LaPE/ --adding-type LaPE
+python -m torch.distributed.launch --nproc_per_node=4 --master_port 29400 \
+    --use_env main.py --model deit_tiny_patch16_224 --batch-size 256 \
+    --data-path data/imagenet --output_dir result/deit_t_LaPE/ --join-type LaPE
 ```
-## Evaluate the model
+### Evaluatation
 ```
-python main.py --eval --resume [path to model] --model deit_small_patch16_224 --data-path [path to dataset] --adding-type [PE joining method] 
+python main.py --eval --resume [path to model] \
+    --model [model name] --data-path [path to dataset] --join-type [PE joining method] 
 ```
 for example
 ```
-python main.py --eval --resume result/deit_t_LaPE/best_checkpoint.pth --model deit_tiny_patch16_224 --data-path data/imagenet --adding-type LaPE
+python main.py --eval --resume result/deit_t_LaPE/best_checkpoint.pth \
+    --model deit_tiny_patch16_224 --data-path data/imagenet --join-type LaPE
 ```
 
-## Visualize the position correlation
+### Visualizing the position correlation
 ```
 python similarity_visualize.py --ckpt_path [checkpoint path] \
-                               --save_dir [path to save the visualization images] --model_name [model name] \
-                               --pe [pe type] --join-type [PE joining method] 
+    --save_dir [path to save the visualization images] --model_name [model name] \
+    --pe [pe type] --join-type [PE joining method] 
 ```
 for example
 ```
 python similarity_visualize.py --ckpt_path result/deit_t_LaPE/best_checkpoint.pth \
-                                --save_dir visualize/similarity --model_name deit_t_LaPE \
-                                --pe learnable --join-type LaPE
+    --save_dir visualize/similarity --model_name deit_t_LaPE \
+    --pe learnable --join-type LaPE
 ```
 
 ## 📌 Citation
