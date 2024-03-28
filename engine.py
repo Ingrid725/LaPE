@@ -83,17 +83,6 @@ def evaluate(data_loader, model, device):
 
         # compute output
         with torch.cuda.amp.autocast():
-            # pos_embed = torch.squeeze(model.state_dict()['module.pos_embed'])
-            # num_tokens = pos_embed.shape[0]
-            # dim = pos_embed.shape[-1]
-            # norm_pe = torch.zeros(12,num_tokens,dim)
-            # for i in range(12):
-            #     weight = model.state_dict()[f'module.blocks.{i}.pe_norm.weight']
-            #     bias = model.state_dict()[f'module.blocks.{i}.pe_norm.bias']
-            #     norm = nn.LayerNorm([dim],elementwise_affine=False)
-            #     norm_pe[i] = weight * norm(pos_embed) + bias
-
-            # output = model(images,norm_pe=norm_pe)
             output = model(images)
             loss = criterion(output, target)
 
