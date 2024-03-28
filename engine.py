@@ -73,7 +73,7 @@ def evaluate(data_loader, model, device):
 
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Test:'
-
+    
     # switch to evaluation mode
     model.eval()
     
